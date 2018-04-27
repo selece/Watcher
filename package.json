@@ -18,7 +18,8 @@
   },
   "homepage": "https://github.com/selece/Watcher#readme",
   "dependencies": {
-    "es6-request": "^2.4.0",
-    "lodash": "^4.17.10"
+    "lodash": "^4.17.10",
+    "request": "^2.85.0",
+    "request-promise": "^4.2.2"
   }
 }
