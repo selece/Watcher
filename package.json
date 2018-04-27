@@ -1,0 +1,23 @@
+{
+  "name": "watcher",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/selece/Watcher.git"
+  },
+  "author": "Jonathan Liaw <jonathan.liaw@gmail.com> (sidequests.ca)",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/selece/Watcher/issues"
+  },
+  "homepage": "https://github.com/selece/Watcher#readme",
+  "dependencies": {
+    "es6-request": "^2.4.0"
+  }
+}
