@@ -1,37 +1,13 @@
 // imports
 const RequestPromise = require('request-promise');
-const winston = require('winston');
+const Winston = require('winston');
 const _ = require('lodash');
-const moment = require('moment');
+const Moment = require('moment');
+const Twilio = require('twilio');
+const PouchDB = require('pouchdb');
 
 // pull config in for api keys, etc.
 const config = require('./config.js');
-
-// configure winston for logging
-// TODO: prettify the json output - it's quite horrific
-const logger = winston.createLogger({
-  level: 'info',
-  transports: [
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.timestamp(),
-        winston.format.json(),
-        winston.format.prettyPrint(),
-      ),
-    }),
-  ],
-});
-
-/* stock config structure
-  {
-    symbol: EXCHANGE_SYMBOL:STOCK_SYMBOL
-    pool: amount of money allocated
-    threshold: buy/sell if price goes above/below this percentage
-    delta: amount to buy/sell if threshold is met
-    holding: amount of stock currently on hand
-    initial: initial amount to base threshold from
-  }
-*/
 
 /* api get structure
 
@@ -52,60 +28,120 @@ const logger = winston.createLogger({
       5. volume
 */
 
-// function declarations
-function getOptions({ symbol }) {
-  return {
-    uri: 'https://www.alphavantage.co/query',
+const db = new PouchDB(config.pouchdb.db);
+
+// configure Winston for logging
+// TODO: prettify the json output - it's quite horrific
+const logger = Winston.createLogger({
+  level: 'info',
+  transports: [
+    new Winston.transports.Console({
+      format: Winston.format.combine(
+        Winston.format.timestamp(),
+        Winston.format.json(),
+        Winston.format.prettyPrint(),
+      ),
+    }),
+  ],
+});
+
+// twilio api access
+const twilioClient = new Twilio(config.twilio.sid, config.twilio.auth);
+
+// functions & helpers
+const buildRequestPromiseOptions = ({ symbol }) => (
+  {
+    uri: config.alphavantage.uri,
     qs: {
       ...config.alphavantage.query,
       apikey: config.alphavantage.apikey,
       symbol,
     },
-    headers: { 'User-Agent': 'Watcher' },
-    json: true,
-  };
-}
-
-function getSeriesString() {
-  return `Time Series (${config.alphavantage.query.interval})`;
-}
-
-function handleStock(stock, response) {
-  const dates = _.keys(response[getSeriesString()]);
-  const recent = moment
-    .max(dates.map(dateString => moment(dateString, config.alphavantage.dateFormat)))
-    .format(config.alphavantage.dateFormat);
-  const data = response[getSeriesString()][recent];
-
-  // TODO: can we move the strings out to config.js?
-  const {
-    // '1. open': open,
-    // '2. high': high,
-    // '3. low': low,
-    '4. close': close,
-    // '5. volume': volume,
-  } = data;
-
-  logger.info(`${stock.symbol} closed @ ${close}`);
-
-  if (close >= stock.initial * (1 + stock.threshold)) {
-    logger.info(`sell triggered for ${stock.symbol}`);
-  } else if (close <= stock.initial * (1 - stock.threshold)) {
-    logger.info(`buy trigger for ${stock.symbol}`);
-  } else {
-    logger.info(`no action required for ${stock.symbol}`);
+    headers: config.alphavantage.headers,
+    json: config.alphavantage.json,
   }
-}
+);
 
-function handleAllStocks() {
+const buildAVSeries = () => `Time Series (${config.alphavantage.query.interval})`;
+
+const sendTwilioAlert = (msg) => {
+  twilioClient.messages
+    .create({
+      msg,
+      to: config.twilio.to,
+      from: config.twilio.from,
+    })
+    .then(() => logger.info('twilio alert successful'))
+    .catch(() => logger.error('failed to send twilio alert'));
+};
+
+const handleOneStock = (symbol, response) => {
+  // response contains last 100 points of data - we're only interested in the most
+  // recent data, so we need to get the most recent date in the series
+  const dates = _.keys(response[buildAVSeries()]);
+  const recent = Moment
+    .max(dates.map(dateString => Moment(dateString, config.alphavantage.dateFormat)))
+    .format(config.alphavantage.dateFormat);
+  const data = response[buildAVSeries()][recent];
+
+  // destructure the data from the api call
+  const { '4. close': close } = data;
+
+  // lookup the current values from the collection (db)
+  db.get(symbol).then((local) => {
+    // set up buy/sell deltas, even if we don't use them
+    const deltaAmount = local.holding * local.delta;
+    const deltaPool = deltaAmount * close;
+    let updateRequired = false;
+
+    if (close >= local.initial * (1 + local.threshold)) {
+      logger.info(`sell trigger for ${symbol}`);
+
+      local.holding -= deltaAmount;
+      local.pool += deltaPool;
+      local.initial = close;
+      updateRequired = true;
+    } else if (close <= local.initial * (1 - local.threshold)) {
+      logger.info(`buy trigger for ${symbol}`);
+
+      local.holding += deltaAmount;
+      local.pool -= deltaPool;
+      local.initial = close;
+      updateRequired = true;
+    } else {
+      logger.info(`no action for ${symbol}, current value @ ${close}`);
+    }
+
+    if (updateRequired) {
+      db.put(local).then(() => logger.info(`write to DB > ${symbol}`));
+    }
+  }).catch(err => logger.error(err));
+};
+
+const handleAllStocks = () => {
+  db.allDocs({ include_docs: true }).then((stocks) => {
+    stocks.rows.forEach((result) => {
+      RequestPromise(buildRequestPromiseOptions(result.doc))
+        .then(response => handleOneStock(result.doc.symbol, response))
+        .catch(() => logger.error(`request failed for ${result.doc.symbol}`));
+    });
+  }).catch(err => logger.error(err));
+};
+
+function init() {
+  // check all stocks exist, create if they don't
   config.stocks.forEach((stock) => {
-    RequestPromise(getOptions(stock))
-      .then(response => handleStock(stock, response))
-      .catch(() => {
-        logger.info('request failed!');
-      });
+    db.get(stock.symbol).then((search) => {
+      logger.info(search);
+    }).catch((err) => {
+      if (err.status === 404) {
+        logger.info(`${stock.symbol} not found, creating record`);
+        db.put({ ...stock });
+      }
+    });
   });
+
+  setInterval(() => handleAllStocks(), config.alphavantage.timeout);
 }
 
-setInterval(handleAllStocks, config.alphavantage.timeout);
-logger.info('startup complete');
+init();
