@@ -72,7 +72,7 @@ const sendTwilioAlert = (msg) => {
       from: config.twilio.from,
     })
     .then(() => logger.info('twilio alert successful'))
-    .catch(() => logger.error('failed to send twilio alert'));
+    .catch(err => logger.error('failed to send twilio alert', err));
 };
 
 const handleOneStock = (symbol, response) => {
@@ -93,27 +93,32 @@ const handleOneStock = (symbol, response) => {
     const deltaAmount = local.holding * local.delta;
     const deltaPool = deltaAmount * close;
     let updateRequired = false;
+    const update = { ...local };
 
     if (close >= local.initial * (1 + local.threshold)) {
       logger.info(`sell trigger for ${symbol}`);
 
-      local.holding -= deltaAmount;
-      local.pool += deltaPool;
-      local.initial = close;
+      update.holding -= deltaAmount;
+      update.pool += deltaPool;
+      update.initial = close;
       updateRequired = true;
+      sendTwilioAlert(`SELL -> ${symbol}; ${deltaAmount} UNITS @ ${close}.`);
     } else if (close <= local.initial * (1 - local.threshold)) {
       logger.info(`buy trigger for ${symbol}`);
 
-      local.holding += deltaAmount;
-      local.pool -= deltaPool;
-      local.initial = close;
+      update.holding += deltaAmount;
+      update.pool -= deltaPool;
+      update.initial = close;
       updateRequired = true;
+      sendTwilioAlert(`BUY -> ${symbol}; ${deltaAmount} UNITS @ ${close}.`);
     } else {
       logger.info(`no action for ${symbol}, current value @ ${close}`);
     }
 
     if (updateRequired) {
-      db.put(local).then(() => logger.info(`write to DB > ${symbol}`));
+      db.put(update).then(() => {
+        logger.info(`write to DB > ${symbol}`);
+      }).catch(err => logger.error(err));
     }
   }).catch(err => logger.error(err));
 };
@@ -121,14 +126,15 @@ const handleOneStock = (symbol, response) => {
 const handleAllStocks = () => {
   db.allDocs({ include_docs: true }).then((stocks) => {
     stocks.rows.forEach((result) => {
+      const { doc: { symbol } } = result;
       RequestPromise(buildRequestPromiseOptions(result.doc))
-        .then(response => handleOneStock(result.doc.symbol, response))
-        .catch(() => logger.error(`request failed for ${result.doc.symbol}`));
+        .then(response => handleOneStock(symbol, response))
+        .catch(() => logger.error(`request failed for ${symbol}`));
     });
   }).catch(err => logger.error(err));
 };
 
-function init() {
+function startup() {
   // check all stocks exist, create if they don't
   config.stocks.forEach((stock) => {
     db.get(stock.symbol).then((search) => {
@@ -144,4 +150,4 @@ function init() {
   setInterval(() => handleAllStocks(), config.alphavantage.timeout);
 }
 
-init();
+startup();
