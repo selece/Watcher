@@ -6,6 +6,10 @@ const Moment = require('moment');
 const Twilio = require('twilio');
 const PouchDB = require('pouchdb');
 
+// pull cmdline options using yargs
+const { argv } = require('yargs')
+  .usage('Usage: $0 [--test] [--timeout num(ms)] [--single SYM.BOL]');
+
 // pull config in for api keys, etc.
 const config = require('./config.js');
 
@@ -64,15 +68,19 @@ const buildRequestPromiseOptions = ({ symbol }) => (
 
 const buildAVSeries = () => `Time Series (${config.alphavantage.query.interval})`;
 
-const sendTwilioAlert = (msg) => {
-  twilioClient.messages
-    .create({
-      msg,
-      to: config.twilio.to,
-      from: config.twilio.from,
-    })
-    .then(() => logger.info('twilio alert successful'))
-    .catch(err => logger.error('failed to send twilio alert', err));
+const sendTwilioAlert = (body) => {
+  if (!argv.test) {
+    twilioClient.messages
+      .create({
+        body,
+        to: config.twilio.to,
+        from: config.twilio.from,
+      })
+      .then(() => logger.info(`twilio alert successful @ ${config.twilio.to}`))
+      .catch(err => logger.error('failed to send twilio alert', err.message));
+  } else {
+    logger.info('triggered twiliio alert -- test mode, no sms sent');
+  }
 };
 
 const handleOneStock = (symbol, response) => {
@@ -120,7 +128,7 @@ const handleOneStock = (symbol, response) => {
         logger.info(`write to DB > ${symbol}`);
       }).catch(err => logger.error(err));
     }
-  }).catch(err => logger.error(err));
+  }).catch(err => logger.error(err.message));
 };
 
 const handleAllStocks = () => {
@@ -131,23 +139,32 @@ const handleAllStocks = () => {
         .then(response => handleOneStock(symbol, response))
         .catch(() => logger.error(`request failed for ${symbol}`));
     });
-  }).catch(err => logger.error(err));
+  }).catch(err => logger.error(err.message));
 };
 
 function startup() {
-  // check all stocks exist, create if they don't
-  config.stocks.forEach((stock) => {
-    db.get(stock.symbol).then((search) => {
-      logger.info(search);
-    }).catch((err) => {
-      if (err.status === 404) {
-        logger.info(`${stock.symbol} not found, creating record`);
-        db.put({ ...stock });
-      }
+  // if we're running normal mode
+  if (!argv.single) {
+    // check all stocks exist, create if they don't
+    config.stocks.forEach((stock) => {
+      db.get(stock.symbol).then((search) => {
+        logger.info(search);
+      }).catch((err) => {
+        if (err.status === 404) {
+          logger.info(`${stock.symbol} not found, creating record`);
+          db.put({ ...stock });
+        }
+      });
     });
-  });
 
-  setInterval(() => handleAllStocks(), config.alphavantage.timeout);
+    setInterval(() => handleAllStocks(), argv.timeout ? argv.timeout : config.alphavantage.timeout);
+
+  // otherwise if we're running in single fetch (test AV api) mode
+  } else {
+    RequestPromise(buildRequestPromiseOptions({ symbol: argv.single }))
+      .then(response => logger.info(response))
+      .catch(err => logger.error(err.message));
+  }
 }
 
 startup();
