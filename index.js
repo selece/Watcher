@@ -46,6 +46,14 @@ const logger = Winston.createLogger({
         Winston.format.prettyPrint(),
       ),
     }),
+    new Winston.transports.File({
+      filename: 'watcher-errors.log',
+      level: 'error',
+    }),
+    new Winston.transports.File({
+      filename: 'watcher-info.log',
+      level: 'info',
+    }),
   ],
 });
 
@@ -76,10 +84,10 @@ const sendTwilioAlert = (body) => {
         to: config.twilio.to,
         from: config.twilio.from,
       })
-      .then(() => logger.info(`twilio alert successful @ ${config.twilio.to}`))
-      .catch(err => logger.error('failed to send twilio alert', err.message));
+      .then(() => logger.info(`TWILIO :: twilio alert successful @ ${config.twilio.to}`))
+      .catch(err => logger.error('TWILIO :: failed to send twilio alert', err.message));
   } else {
-    logger.info('triggered twiliio alert -- test mode, no sms sent');
+    logger.info('TWILIO :: triggered twiliio alert -- test mode, no sms sent');
   }
 };
 
@@ -104,28 +112,28 @@ const handleOneStock = (symbol, response) => {
     const update = { ...local };
 
     if (close >= local.initial * (1 + local.threshold)) {
-      logger.info(`sell trigger for ${symbol}`);
+      logger.info(`HANDLE_ONE :: sell trigger for ${symbol}`);
 
       update.holding -= deltaAmount;
       update.pool += deltaPool;
       update.initial = close;
       updateRequired = true;
-      sendTwilioAlert(`SELL -> ${symbol}; ${deltaAmount} UNITS @ ${close}.`);
+      sendTwilioAlert(`SELL -> ${symbol}; ${deltaAmount} UNITS @ ${close}. HOLDING ${update.holding} UNITS, POOL @ ${update.pool}`);
     } else if (close <= local.initial * (1 - local.threshold)) {
-      logger.info(`buy trigger for ${symbol}`);
+      logger.info(`HANDLE_ONE :: buy trigger for ${symbol}`);
 
       update.holding += deltaAmount;
       update.pool -= deltaPool;
       update.initial = close;
       updateRequired = true;
-      sendTwilioAlert(`BUY -> ${symbol}; ${deltaAmount} UNITS @ ${close}.`);
+      sendTwilioAlert(`BUY -> ${symbol}; ${deltaAmount} UNITS @ ${close}. HOLDING ${update.holding} UNITS, POOL @ ${update.pool}`);
     } else {
-      logger.info(`no action for ${symbol}, current value @ ${close}`);
+      logger.info(`HANDLE_ONE :: no action for ${symbol}, current value @ ${close}`);
     }
 
     if (updateRequired) {
       db.put(update).then(() => {
-        logger.info(`write to DB > ${symbol}`);
+        logger.info(`HANDLE_ONE :: write to DB > ${symbol}`);
       }).catch(err => logger.error(err));
     }
   }).catch(err => logger.error(err.message));
@@ -134,37 +142,38 @@ const handleOneStock = (symbol, response) => {
 const handleAllStocks = () => {
   db.allDocs({ include_docs: true }).then((stocks) => {
     stocks.rows.forEach((result) => {
+      const { doc } = result;
       const { doc: { symbol } } = result;
-      RequestPromise(buildRequestPromiseOptions(result.doc))
+      RequestPromise(buildRequestPromiseOptions(doc))
         .then(response => handleOneStock(symbol, response))
-        .catch(() => logger.error(`request failed for ${symbol}`));
+        .catch(() => logger.error(`HANDLE_ALL :: request failed for ${symbol}`));
     });
   }).catch(err => logger.error(err.message));
 };
 
-function startup() {
-  // if we're running normal mode
+function main() {
+  logger.info('STARTUP :: ** process started **');
   if (!argv.single) {
+    // if we're running normal mode...
     // check all stocks exist, create if they don't
     config.stocks.forEach((stock) => {
       db.get(stock.symbol).then((search) => {
-        logger.info(search);
+        logger.info(`INIT :: found record for ${stock.symbol}: ${JSON.stringify(search)}`);
       }).catch((err) => {
         if (err.status === 404) {
-          logger.info(`${stock.symbol} not found, creating record`);
+          logger.info(`INIT :: ${stock.symbol} not found, creating record`);
           db.put({ ...stock });
         }
       });
     });
 
     setInterval(() => handleAllStocks(), argv.timeout ? argv.timeout : config.alphavantage.timeout);
-
-  // otherwise if we're running in single fetch (test AV api) mode
   } else {
+    // otherwise if we're running in single fetch (test AV api) mode
     RequestPromise(buildRequestPromiseOptions({ symbol: argv.single }))
       .then(response => logger.info(response))
       .catch(err => logger.error(err.message));
   }
 }
 
-startup();
+main();
