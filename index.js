@@ -144,6 +144,7 @@ const handleAllStocks = () => {
     stocks.rows.forEach((result) => {
       const { doc } = result;
       const { doc: { symbol } } = result;
+
       RequestPromise(buildRequestPromiseOptions(doc))
         .then(response => handleOneStock(symbol, response))
         .catch(() => logger.error(`HANDLE_ALL :: request failed for ${symbol}`));
@@ -162,7 +163,9 @@ function main() {
       }).catch((err) => {
         if (err.status === 404) {
           logger.info(`INIT :: ${stock.symbol} not found, creating record`);
-          db.put({ ...stock });
+          db.put({ ...stock })
+            .then(() => logger.info(`INIT :: ${stock.symbol} write to DB success!`))
+            .catch(error => logger.error(`INIT :: ${stock.symbol} failed to write to DB : ${error.message}`));
         }
       });
     });
