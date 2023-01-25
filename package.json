@@ -29,7 +29,7 @@
     "pouchdb": "^7.3.0",
     "request": "^2.88.0",
     "request-promise": "^4.2.2",
-    "twilio": "^3.31.0",
+    "twilio": "^4.0.0",
     "winston": "^3.0.0",
     "yargs": "^13.2.4",
     "snyk": "^1.89.1"
