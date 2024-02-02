@@ -28,7 +28,7 @@
     "npm": "^7.21.0",
     "pouchdb": "^7.3.0",
     "request": "^2.88.0",
-    "request-promise": "^4.2.2",
+    "request-promise": "^4.2.6",
     "twilio": "^3.31.0",
     "winston": "^3.0.0",
     "yargs": "^13.2.4",
