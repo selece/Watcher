@@ -21,7 +21,7 @@
   "homepage": "https://github.com/selece/Watcher#readme",
   "dependencies": {
     "babel-runtime": "^6.26.0",
-    "eslint": "^6.1.0",
+    "eslint": "^9.15.0",
     "immutable": "^3.8.2",
     "lodash": "^4.17.21",
     "moment": "^2.29.2",
@@ -31,7 +31,7 @@
     "request-promise": "^4.2.2",
     "twilio": "^3.31.0",
     "winston": "^3.0.0",
-    "yargs": "^13.2.4",
+    "yargs": "^13.3.0",
     "snyk": "^1.89.1"
   },
   "devDependencies": {
