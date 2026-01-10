@@ -27,7 +27,7 @@
     "moment": "^2.29.2",
     "npm": "^7.21.0",
     "pouchdb": "^7.3.0",
-    "request": "^2.88.0",
+    "request": "^2.88.2",
     "request-promise": "^4.2.2",
     "twilio": "^3.31.0",
     "winston": "^3.0.0",
